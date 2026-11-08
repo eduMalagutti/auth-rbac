@@ -1,0 +1,109 @@
+# PR-Agent configuration (https://github.com/the-pr-agent/pr-agent).
+# Run by the "AI Review" job in .github/workflows/ci.yml, after the tests pass.
+#
+# Settings that come from the workflow, not from this file:
+#
+#   env:
+#     OPENAI.KEY: ${{ secrets.OPENSCALE_API_KEY }}      # OpenScale key (secret)
+#     OPENAI.API_BASE: https://api.openscale.so/v1      # OpenScale's OpenAI-compatible endpoint
+#     PR_AGENT_CONFIG_BRANCH: v1-modular-monolith       # where THIS file is read from (see below)
+#
+# - The endpoint and key live in the workflow because they decide where your code and your key
+#   are sent; a repo config file shouldn't be able to redirect them.
+# - PR_AGENT_CONFIG_BRANCH: PR-Agent reads .pr_agent.toml from the default branch (main) by
+#   default. During v1, main has no .pr_agent.toml, so it must point at v1-modular-monolith.
+#   It is a fixed, maintainer-controlled branch: never set it from PR input such as
+#   ${{ github.head_ref }}, or any branch could supply its own review rules.
+#   Switch it back (remove the variable) once v1 is merged into main.
+
+[config]
+# OpenScale is OpenAI-compatible, so the model uses LiteLLM's "openai/" prefix; what follows the
+# prefix is OpenScale's model id, sent as-is to OPENAI.API_BASE.
+model = "openai/deepseek/deepseek-v4.1-flash"
+fallback_models = []
+# The model isn't in PR-Agent's token-limit table, so its input limit must be set by hand.
+# Conservative value; raise it to the context size listed for the model on OpenScale.
+custom_model_max_tokens = 64000
+
+# Repo files added to every prompt.
+# The review follows Matt Pocock's code-review skill (.agents/skills/code-review/SKILL.md).
+# PR-Agent can't run skills (no sub-agents, no tools), so it gets the skill's text as context and
+# applies its rules; the extra_instructions below map the skill's process onto PR-Agent.
+# PR-Agent can't follow the CODING_STANDARDS.md router either: it loads every file below in full.
+# Together they must stay under repo_context_max_lines.
+repo_context_files = [
+    ".agents/skills/code-review/SKILL.md",
+    "AGENTS.md",
+    "docs/CODING_STANDARDS.md",
+    "docs/standards/*.md",
+    "docs/architecture/*.md",
+    "docs/adr/*.md",
+]
+# Caps the docs above only (wrapper tags included), not the PR diff: the diff has its own budget
+# inside custom_model_max_tokens. Content past the cap is cut from the end of the list, so the
+# most important files come first. Rough prompt size at the cap, with a 500-line PR:
+#   1000 doc lines ~ 15-20k tokens + diff with context ~ 10-15k + instructions ~ 4k = ~30-40k,
+# under the 64k custom_model_max_tokens.
+repo_context_max_lines = 1000
+
+# Read those files from the PR's target branch, not the default branch (main has no docs/ until
+# v1 is merged). A PR can only target a branch that already exists in this repository, and only
+# maintainers can create or push to those, so the review rules still come from merged content.
+repo_context_from_default_branch = false
+
+[pr_reviewer]
+require_tests_review = true
+require_security_review = true
+require_estimate_effort_to_review = true
+require_merge_recommendation = true
+
+# Tickets are GitHub issues (no Jira). PR-Agent finds the issue from "#N" / "Closes #N" in the PR
+# title or description, and on GitHub also from the number in the branch name (2-auth -> #2),
+# then checks that the PR does what the issue asks.
+require_ticket_analysis_review = true
+
+extra_instructions = """
+This review only runs after CI passed: the code compiles, the lint (Spotless) is clean and every
+unit, module and integration test is green. Don't speculate about whether it builds or tests pass.
+Do check that new behavior in the diff has tests (docs/architecture/testing-strategy.md).
+
+Follow the code-review skill in .agents/skills/code-review/SKILL.md (Matt Pocock's two-axis review).
+You already have the diff, so skip its process steps (pinning a fixed point, git commands,
+spawning sub-agents); apply its two axes and keep them separate.
+
+Standards axis:
+- Documented standards: AGENTS.md, docs/CODING_STANDARDS.md and the files it routes to
+  (docs/standards/, docs/architecture/). Cite the file and the rule for every finding.
+- The skill's smell baseline (Fowler code smells). Smells are always judgement calls, labelled
+  "possible <smell>"; a documented repo standard overrides the baseline.
+- Module boundaries count as a hard standard: a module may only use another module's top-level
+  package types and events, never its subpackages or tables (docs/architecture/modules.md).
+- Skip anything tooling enforces: formatting (Spotless), @Data / @EqualsAndHashCode / @Value
+  (lombok.config fails the build), module boundary cycles caught by ModularityTests.
+
+Spec axis:
+- The spec is the linked GitHub issue (one issue per project phase). Report requirements that
+  are missing or partial, behavior nobody asked for (scope creep), and requirements that look
+  implemented but wrong. Quote the issue line for each finding.
+
+Report the two axes under separate "Standards" and "Spec" headings. Do not merge or rerank
+findings across axes.
+
+Always flag, whatever the axis: security problems in authentication, authorization or token
+contents, and any edit to an already-merged Liquibase changeset (they must never change).
+"""
+
+[pr_code_suggestions]
+# Suggestions are posted as GitHub "suggested changes": one click to commit them from the PR.
+# Only suggestions whose replacement range PR-Agent can verify become committable; the rest stay
+# regular comments.
+committable_code_suggestions = true
+# Default true limits suggestions to bugs. The pipeline is where "make it good" happens, so
+# suggestions also cover maintainability, smells and standards.
+focus_only_on_problems = false
+suggestions_score_threshold = 7
+extra_instructions = """
+Prefer suggestions that bring the code in line with docs/CODING_STANDARDS.md (cite the rule) or
+remove a smell from the code-review skill's baseline. Keep each suggestion small and
+self-contained, so it can be committed on its own.
+"""
