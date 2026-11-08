@@ -1,0 +1,23 @@
+# Shared configuration: no secrets, no environment-specific values.
+spring:
+  application:
+    name: auth-rbac
+  threads:
+    virtual:
+      # Request handling, @Async and scheduling run on virtual threads. Since Java 24 (JEP 491),
+      # synchronized blocks no longer pin the carrier thread, so JDBC drivers and libraries that
+      # use synchronized are safe on virtual threads.
+      enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  liquibase:
+    # Default location, stated so it's easy to find. Liquibase owns the schema; Hibernate only validates it.
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true

@@ -19,11 +19,13 @@
 [config]
 # OpenScale is OpenAI-compatible, so the model uses LiteLLM's "openai/" prefix; what follows the
 # prefix is OpenScale's model id, sent as-is to OPENAI.API_BASE.
-model = "openai/deepseek/deepseek-v4.1-flash"
+# Fixed version (-1017): the bare "deepseek-v4.1-flash" id always points to the latest release.
+model = "openai/deepseek/deepseek-v4.1-flash-1017"
 fallback_models = []
 # The model isn't in PR-Agent's token-limit table, so its input limit must be set by hand.
-# Conservative value; raise it to the context size listed for the model on OpenScale.
-custom_model_max_tokens = 64000
+# OpenScale serves it with a ~1M-token context; 200k is a deliberate cap: review quality drops on
+# huge prompts, and a PR that needs more should be split.
+custom_model_max_tokens = 200000
 
 # Repo files added to every prompt.
 # The review follows Matt Pocock's code-review skill (.agents/skills/code-review/SKILL.md).
@@ -43,13 +45,24 @@ repo_context_files = [
 # inside custom_model_max_tokens. Content past the cap is cut from the end of the list, so the
 # most important files come first. Rough prompt size at the cap, with a 500-line PR:
 #   1000 doc lines ~ 15-20k tokens + diff with context ~ 10-15k + instructions ~ 4k = ~30-40k,
-# under the 64k custom_model_max_tokens.
+# well under the 200k custom_model_max_tokens.
 repo_context_max_lines = 1000
 
 # Read those files from the PR's target branch, not the default branch (main has no docs/ until
 # v1 is merged). A PR can only target a branch that already exists in this repository, and only
 # maintainers can create or push to those, so the review rules still come from merged content.
 repo_context_from_default_branch = false
+
+# Vendored or generated files: not reviewed, and kept out of the diff's token budget.
+[ignore]
+glob = [
+    ".agents/skills/**",
+    ".claude/skills/**",
+    "skills-lock.json",
+    "gradlew",
+    "gradlew.bat",
+    "gradle/wrapper/**",
+]
 
 [pr_reviewer]
 require_tests_review = true

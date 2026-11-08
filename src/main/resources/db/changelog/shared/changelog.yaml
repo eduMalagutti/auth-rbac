@@ -1,0 +1,4 @@
+# Changes shared by all modules (not owned by any single module).
+databaseChangeLog:
+  - include:
+      file: db/changelog/shared/001-event-publication.sql
