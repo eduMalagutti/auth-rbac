@@ -1,0 +1,34 @@
+// Spotless rules: the single source of code style for this repository.
+// Applied from build.gradle. Check with ./gradlew spotlessCheck (CI), fix with ./gradlew spotlessApply.
+
+spotless {
+	java {
+		target 'src/**/*.java'
+		// Palantir Java Format: Google-style layout with 120-column lines and lambda-friendly wrapping.
+		// It also sorts imports, so no separate import-order rule (the two would fight).
+		palantirJavaFormat('2.103.0')
+		removeUnusedImports()
+		// import com.foo.* hides where a type comes from and breaks on name clashes.
+		forbidWildcardImports()
+		// Java 25 "import module java.base;" has the same problem at module scale.
+		forbidModuleImports()
+		// Keeps type annotations (@Nullable String) next to the type, not on their own line.
+		formatAnnotations()
+		trimTrailingWhitespace()
+		endWithNewline()
+	}
+
+	groovyGradle {
+		target '*.gradle', 'style/*.gradle'
+		greclipse()
+	}
+
+	// Files with no real formatter here: only whitespace hygiene.
+	// YAML is not reformatted on purpose: the available YAML formatters drop comments.
+	format 'misc', {
+		target '*.md', 'docs/**/*.md', 'src/**/*.yaml', 'src/**/*.sql', '*.yaml', '*.toml', '.github/**/*.yml', '.gitignore'
+		trimTrailingWhitespace()
+		leadingTabsToSpaces(2)
+		endWithNewline()
+	}
+}

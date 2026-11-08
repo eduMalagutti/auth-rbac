@@ -1,0 +1,121 @@
+# CI: build + lint, then tests, then AI review. Each stage runs only if the previous one passed.
+name: CI
+
+on:
+  pull_request:
+    branches: [main, v1-modular-monolith]
+    # ready_for_review: the AI review skips drafts, so it runs when a draft is marked ready.
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main, v1-modular-monolith]
+  workflow_dispatch:
+
+# A new push to the same PR or branch cancels the run still in progress.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+
+      # Caches Gradle and its dependencies, and validates the Gradle wrapper jar.
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Compile main and test code
+        run: ./gradlew assemble testClasses
+
+      - name: Lint (Spotless, rules in style/)
+        run: ./gradlew spotlessCheck
+
+  test:
+    name: Tests
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # Cheapest first: a failing kind stops the slower ones after it.
+      - name: Unit tests
+        run: ./gradlew unitTest
+
+      # Module and integration tests start PostgreSQL with Testcontainers (Docker is preinstalled on the runner).
+      - name: Module tests
+        run: ./gradlew moduleTest
+
+      - name: Integration tests
+        run: ./gradlew integrationTest
+
+      # Kept for every run, failed or not, to debug failures from the run page.
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports
+          path: |
+            build/reports/tests/
+            build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Runs only when build, lint and every test passed (needs: test), so the review can assume
+  # the code compiles and the tests are green.
+  ai-review:
+    name: AI Review
+    needs: test
+    # Pull requests only; not drafts; not from forks (forks get no secrets); not from bots
+    # (Dependabot PRs get a read-only token and only Dependabot secrets, so the review can't run).
+    if: >-
+      github.event_name == 'pull_request'
+      && !github.event.pull_request.draft
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.sender.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Advisory: the review comments on the PR but never blocks the merge.
+    continue-on-error: true
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      # Pinned by digest: pragent/pr-agent:0.49.0-github_action. Settings in .pr_agent.toml.
+      # Not `uses: the-pr-agent/pr-agent@<ref>`: that wrapper builds FROM the rolling
+      # pragent/pr-agent:github_action tag, so even a pinned ref runs the latest code.
+      - name: PR-Agent review and suggestions
+        uses: docker://pragent/pr-agent@sha256:b1ed6e8de56eb4d6e4169ee0d5c209bb5ed1ef071a01c0c042c64b80192a785c
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # OpenScale (OpenAI-compatible). Endpoint and key stay here, never in the repo config.
+          OPENAI.KEY: ${{ secrets.OPENSCALE_API_KEY }}
+          OPENAI.API_BASE: https://api.openscale.so/v1
+          # .pr_agent.toml is read from main by default, which has none during v1. Fixed,
+          # maintainer-controlled branch: never set this from PR input (github.head_ref).
+          # Remove once v1 is merged into main.
+          PR_AGENT_CONFIG_BRANCH: v1-modular-monolith
+          github_action_config.auto_review: "true"
+          github_action_config.auto_improve: "true"
+          # Off: /describe rewrites the PR title and description.
+          github_action_config.auto_describe: "false"
+          # Also review new commits pushed to an open PR.
+          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review", "synchronize"]'

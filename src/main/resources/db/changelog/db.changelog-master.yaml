@@ -1,0 +1,12 @@
+# Master changelog: the only file Liquibase reads directly (Spring Boot's default location).
+#
+# Order matters. Shared changes first, then each module in dependency order:
+# a module's changelog comes after the modules it depends on (rbac before auth, admin, inventory).
+# Each module owns db/changelog/<module>/ and nothing else; in v2 each service takes its folder with it.
+databaseChangeLog:
+  - include:
+      file: db/changelog/shared/changelog.yaml
+  # Added per phase:
+  # - include: { file: db/changelog/rbac/changelog.yaml }       # Phase 2
+  # - include: { file: db/changelog/auth/changelog.yaml }       # Phase 1
+  # - include: { file: db/changelog/inventory/changelog.yaml }  # Phase 4

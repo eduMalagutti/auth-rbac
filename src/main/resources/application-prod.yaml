@@ -1,0 +1,11 @@
+# Prod-like runs: no defaults for anything that matters, so a missing variable fails at startup.
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+  docker:
+    compose:
+      enabled: false
